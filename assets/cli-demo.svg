@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 540" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#16171f"/>
+      <stop offset="100%" stop-color="#0e0f14"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    .title { font-size: 13px; font-weight: 600; fill: #9ca3af; }
+    .text-dim { font-size: 12px; fill: #6b7280; }
+    .text-main { font-size: 13px; fill: #e5e7eb; }
+    .text-bold { font-size: 13px; font-weight: 700; fill: #ffffff; }
+    .text-accent { font-size: 13px; font-weight: 600; fill: #d77757; }
+    .text-green { font-size: 13px; fill: #2dd86a; }
+    .text-red { font-size: 13px; fill: #ef5c5c; }
+    .text-cyan { font-size: 13px; fill: #7cf6ff; }
+    .text-gold { font-size: 13px; fill: #ecb84e; }
+    .text-blue { font-size: 13px; fill: #7eb6f6; }
+    .text-line { stroke: #3c3e48; stroke-width: 1; }
+  </style>
+
+  <!-- Terminal Window with Drop Shadow -->
+  <rect x="20" y="20" width="880" height="500" rx="10" fill="url(#bgGrad)" stroke="#262837" stroke-width="1.5" filter="url(#shadow)" />
+
+  <!-- Window Header / Title Bar -->
+  <rect x="20" y="20" width="880" height="38" rx="10" fill="#1b1c27" />
+  <rect x="20" y="46" width="880" height="12" fill="#1b1c27" />
+  <line x1="20" y1="58" x2="900" y2="58" stroke="#262837" stroke-width="1" />
+
+  <!-- Traffic Light Window Buttons -->
+  <circle cx="44" cy="39" r="6" fill="#ef4444" />
+  <circle cx="64" cy="39" r="6" fill="#f59e0b" />
+  <circle cx="84" cy="39" r="6" fill="#10b981" />
+
+  <!-- Window Title -->
+  <text x="460" y="43" text-anchor="middle" class="mono title">APInex CLI — ~/workspace/project</text>
+
+  <!-- Terminal Content Area -->
+  <g transform="translate(42, 80)" class="mono">
+    
+    <!-- Header Lines with Mascot -->
+    <g transform="translate(0, 0)">
+      <!-- Pixel Mascot -->
+      <text x="20" y="14" class="text-gold">✦</text>
+      <text x="6" y="28" class="text-accent">▄█████▄</text>
+      <text x="6" y="42" class="text-accent">█<tspan fill="#7cf6ff">◉</tspan> <tspan fill="#7cf6ff">◉</tspan>█</text>
+      <text x="12" y="54" class="text-accent">▀   ▀</text>
+
+      <!-- Header Info Lines -->
+      <text x="86" y="16" class="text-bold">APInex CLI <tspan fill="#6b7280" font-weight="normal">v1.0.0</tspan></text>
+      <text x="86" y="32" class="text-green">$10.00<tspan fill="#6b7280"> · </tspan><tspan fill="#7eb6f6">Free · 0/0</tspan><tspan fill="#6b7280"> · </tspan><tspan fill="#ecb84e">60 RPM</tspan></text>
+      <text x="86" y="48" class="text-dim">~/workspace/project</text>
+      <text x="8" y="72" class="text-dim">│ Using <tspan fill="#ffffff">free/deepseek-v4.1-flash</tspan> · type <tspan fill="#ffffff">/model</tspan> to switch · <tspan fill="#ffffff">/help</tspan> for commands</text>
+    </g>
+
+    <!-- User Turn -->
+    <g transform="translate(0, 108)">
+      <text x="0" y="0" class="text-accent">❯</text>
+      <text x="16" y="0" class="text-bold">Refactor auth token verification with cryptographic signature</text>
+    </g>
+
+    <!-- Tool Call -->
+    <g transform="translate(0, 136)">
+      <text x="10" y="0" class="text-cyan">◆ Tool: <tspan fill="#ffffff" font-weight="bold">edit_file</tspan><tspan fill="#8a8892">(server/auth.ts)</tspan> · <tspan fill="#2dd86a">+18 lines</tspan> <tspan fill="#ef5c5c">-7 lines</tspan></text>
+      
+      <!-- Unified Diff -->
+      <g transform="translate(32, 18)" font-size="12">
+        <text x="0" y="0" fill="#6b7280">      // Verify token HMAC signature</text>
+        <rect x="-8" y="6" width="760" height="18" rx="2" fill="#3c1414" />
+        <text x="0" y="19" fill="#ff8c8c"> -    const isValid = token === expectedToken</text>
+        <rect x="-8" y="27" width="760" height="18" rx="2" fill="#143219" />
+        <text x="0" y="40" fill="#78e68c"> +    const isValid = timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken))</text>
+      </g>
+    </g>
+
+    <!-- Assistant Turn -->
+    <g transform="translate(0, 226)">
+      <text x="0" y="0" class="text-accent">◆</text>
+      <text x="16" y="0" class="text-main">Refactored token verification in <tspan fill="#ecb84e">server/auth.ts</tspan> using timing-safe comparisons.</text>
+      <text x="16" y="18" class="text-dim">All existing test suites pass without regressions.</text>
+      <text x="16" y="36" class="text-dim">⏱ 1.2s · 438 tokens (310 in · 128 out)</text>
+    </g>
+
+    <!-- Divider Line -->
+    <line x1="-12" y1="300" x2="846" y2="300" class="text-line" />
+
+    <!-- Input Box -->
+    <g transform="translate(0, 324)">
+      <text x="0" y="0" class="text-accent" font-weight="700">❯</text>
+      <text x="16" y="0" class="text-main">Run tests to verify the new auth implementation</text>
+      <rect x="420" y="-12" width="8" height="15" fill="#d77757">
+        <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" />
+      </rect>
+    </g>
+
+    <!-- Bottom Divider Line -->
+    <line x1="-12" y1="344" x2="846" y2="344" class="text-line" />
+
+    <!-- Status Bar / Context Meter -->
+    <g transform="translate(0, 366)">
+      <text x="10" y="0" class="text-dim">Context: <tspan fill="#2dd86a">842 / 128K</tspan> · <tspan fill="#ffffff">/help</tspan> for commands</text>
+    </g>
+  </g>
+</svg>

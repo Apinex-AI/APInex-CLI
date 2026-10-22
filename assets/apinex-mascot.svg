@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 210" width="100%" height="100%">
+  <defs>
+    <!-- Soft Glow Filter -->
+    <filter id="sparkGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <radialGradient id="shadowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g transform="translate(40, 15)">
+    <!-- Floating Soft Ground Shadow -->
+    <ellipse cx="80" cy="165" rx="38" ry="8" fill="url(#shadowGrad)" />
+
+    <!-- Robot Character Scaled 10x Pixel-Perfect Grid (16x14 grid) -->
+    <!-- Antenna / Spark with Glow -->
+    <g filter="url(#sparkGlow)">
+      <rect x="70" y="10" width="20" height="10" fill="#ECB84E"/>
+      <rect x="60" y="20" width="40" height="10" fill="#ECB84E"/>
+      <rect x="70" y="20" width="20" height="10" fill="#FFF09E"/>
+      <rect x="70" y="30" width="20" height="10" fill="#ECB84E"/>
+      <rect x="70" y="40" width="20" height="10" fill="#8E4931"/>
+    </g>
+
+    <!-- Head Top -->
+    <rect x="40" y="50" width="80" height="10" fill="#D67E5C"/>
+    
+    <!-- Head Row 2 -->
+    <rect x="30" y="60" width="10" height="10" fill="#D67E5C"/>
+    <rect x="40" y="60" width="20" height="10" fill="#F8C6A6"/>
+    <rect x="60" y="60" width="70" height="10" fill="#D67E5C"/>
+
+    <!-- Screen Frame & Face Cavity -->
+    <rect x="30" y="70" width="10" height="10" fill="#D67E5C"/>
+    <rect x="40" y="70" width="80" height="10" fill="#0F1018"/>
+    <rect x="120" y="70" width="10" height="10" fill="#D67E5C"/>
+
+    <!-- Left Arm -->
+    <rect x="10" y="90" width="20" height="10" fill="#8E4931"/>
+    <rect x="10" y="100" width="20" height="10" fill="#8E4931"/>
+
+    <!-- Right Arm -->
+    <rect x="130" y="90" width="20" height="10" fill="#8E4931"/>
+    <rect x="130" y="100" width="20" height="10" fill="#8E4931"/>
+
+    <!-- Face Interior -->
+    <rect x="30" y="80" width="10" height="10" fill="#D67E5C"/>
+    <rect x="40" y="80" width="80" height="20" fill="#0F1018"/>
+    <rect x="120" y="80" width="10" height="10" fill="#D67E5C"/>
+
+    <rect x="30" y="90" width="10" height="10" fill="#D67E5C"/>
+    <rect x="120" y="90" width="10" height="10" fill="#D67E5C"/>
+
+    <!-- Cyan Glowing Eyes -->
+    <!-- Left Eye -->
+    <rect x="50" y="80" width="10" height="10" fill="#FFFFFF"/>
+    <rect x="60" y="80" width="10" height="10" fill="#7CF6FF"/>
+    <rect x="50" y="90" width="20" height="10" fill="#7CF6FF"/>
+
+    <!-- Right Eye -->
+    <rect x="90" y="80" width="10" height="10" fill="#FFFFFF"/>
+    <rect x="100" y="80" width="10" height="10" fill="#7CF6FF"/>
+    <rect x="90" y="90" width="20" height="10" fill="#7CF6FF"/>
+
+    <!-- Cheeks & Mouth -->
+    <rect x="30" y="100" width="10" height="10" fill="#D67E5C"/>
+    <rect x="40" y="100" width="10" height="10" fill="#FF7AA2"/>
+    <rect x="50" y="100" width="20" height="10" fill="#0F1018"/>
+    <rect x="70" y="100" width="20" height="10" fill="#7CF6FF"/>
+    <rect x="90" y="100" width="20" height="10" fill="#0F1018"/>
+    <rect x="110" y="100" width="10" height="10" fill="#FF7AA2"/>
+    <rect x="120" y="100" width="10" height="10" fill="#D67E5C"/>
+
+    <!-- Chin / Bottom Head -->
+    <rect x="30" y="110" width="100" height="10" fill="#D67E5C"/>
+    <rect x="40" y="120" width="80" height="10" fill="#8E4931"/>
+
+    <!-- Feet -->
+    <rect x="40" y="120" width="20" height="20" fill="#66301F"/>
+    <rect x="100" y="120" width="20" height="20" fill="#66301F"/>
+  </g>
+</svg>

@@ -1,0 +1,47 @@
+{
+  "name": "apinex-cli",
+  "version": "1.0.0",
+  "description": "Zero-config autonomous terminal AI coding assistant & Unix CLI for APInex (OAuth 2.0 + PKCE, interactive TUI, native agent tools, crypto billing, Unix pipes)",
+  "homepage": "https://apinex.bond/cli",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Apinex-AI/APInex-CLI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Apinex-AI/APInex-CLI/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "apinex": "./bin/apinex.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node ./bin/apinex.mjs",
+    "test": "node --check ./bin/apinex.mjs && node --check ./src/index.mjs"
+  },
+  "keywords": [
+    "apinex",
+    "ai",
+    "cli",
+    "coding-assistant",
+    "agent",
+    "terminal-tui",
+    "llm",
+    "openai",
+    "claude",
+    "deepseek"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
