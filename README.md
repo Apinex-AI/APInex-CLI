@@ -1,7 +1,7 @@
 # APInex CLI
 
 <p align="center">
-  <img src="assets/apinex-mascot.svg" width="160" alt="APInex Mascot NEX" />
+  <img src="https://raw.githubusercontent.com/Apinex-AI/APInex-CLI/main/assets/apinex-mascot.svg" width="160" alt="APInex Mascot NEX" />
 </p>
 
 <p align="center">
@@ -11,12 +11,12 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/apinex-cli"><img src="https://img.shields.io/npm/v/apinex-cli.svg?style=flat-square&color=2dd4bf" alt="npm version" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="license" /></a>
+  <a href="https://github.com/Apinex-AI/APInex-CLI/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="license" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg?style=flat-square" alt="node version" /></a>
 </p>
 
 <p align="center">
-  <img src="assets/cli-demo.svg" width="100%" alt="APInex CLI Terminal Interface Demo" />
+  <img src="https://raw.githubusercontent.com/Apinex-AI/APInex-CLI/main/assets/cli-demo.svg" width="100%" alt="APInex CLI Terminal Interface Demo" />
 </p>
 
 ---

@@ -10,6 +10,7 @@
   "bugs": {
     "url": "https://github.com/Apinex-AI/APInex-CLI/issues"
   },
+  "author": "APInex <info@apinex.bond> (https://apinex.bond)",
   "license": "MIT",
   "type": "module",
   "bin": {
