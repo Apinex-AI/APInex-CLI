@@ -12,7 +12,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.1'
+const VERSION = '1.0.2'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -686,7 +686,7 @@ const authFile = () => join(configDir(), 'auth.json')
 const cfgFile = () => join(configDir(), 'config.json')
 const modelsFile = () => join(configDir(), 'models.json')
 const updateFile = () => join(configDir(), 'update.json')
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
 
 function parseSemver(v) {
   const parts = String(v || '').replace(/^v/, '').split('.').map((p) => parseInt(p, 10) || 0)
@@ -714,23 +714,49 @@ async function checkRemoteVersion(force = false) {
     return cached
   }
   try {
-    const res = await fetch(`${API_ORIGIN}/api/cli/version`, {
-      headers: { ...CLI_HEADERS },
-      signal: AbortSignal.timeout(3500),
-    })
-    if (!res.ok) return cached
-    const data = await res.json()
-    const latestVersion = String(data.version || '').replace(/^v/, '')
-    const hasUpdate = isNewerVersion(VERSION, latestVersion)
+    let npmVersion = null
+    let apiData = null
+
+    // Query both npm registry and backend API in parallel with strict timeout
+    const [npmResult, apiResult] = await Promise.allSettled([
+      fetch('https://registry.npmjs.org/apinex-cli/latest', {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(3500),
+      }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_ORIGIN}/api/cli/version`, {
+        headers: { ...CLI_HEADERS },
+        signal: AbortSignal.timeout(3500),
+      }).then((r) => (r.ok ? r.json() : null)),
+    ])
+
+    if (npmResult.status === 'fulfilled' && npmResult.value?.version) {
+      npmVersion = String(npmResult.value.version).replace(/^v/, '')
+    }
+    if (apiResult.status === 'fulfilled' && apiResult.value) {
+      apiData = apiResult.value
+    }
+
+    const apiVersion = String(apiData?.version || '').replace(/^v/, '')
+
+    // Select the highest available remote version between npm and API
+    let bestVersion = npmVersion || apiVersion
+    if (npmVersion && apiVersion) {
+      bestVersion = isNewerVersion(npmVersion, apiVersion) ? apiVersion : npmVersion
+    }
+
+    if (!bestVersion) return cached
+
+    const hasUpdate = isNewerVersion(VERSION, bestVersion)
     const updateInfo = {
       checkedAt: Date.now(),
-      latestVersion,
+      latestVersion: bestVersion,
       hasUpdate,
-      critical: Boolean(data.critical),
-      changelog: String(data.changelog || ''),
-      releaseUrl: String(data.releaseUrl || 'https://github.com/Apinex-AI/APInex-CLI/releases'),
-      installCommand: String(data.installCommand || 'npm install -g apinex-cli'),
+      critical: Boolean(apiData?.critical),
+      changelog: String(apiData?.changelog || ''),
+      releaseUrl: String(apiData?.releaseUrl || `https://github.com/Apinex-AI/APInex-CLI/releases/tag/v${bestVersion}`),
+      installCommand: String(apiData?.installCommand || 'npm install -g apinex-cli@latest'),
     }
+
     writeSecretJson(updateFile(), updateInfo)
     return updateInfo
   } catch {
