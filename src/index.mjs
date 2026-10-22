@@ -12,7 +12,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -189,24 +189,53 @@ function generateApinexMd(cwd = process.cwd()) {
   return lines.join('\n')
 }
 
-const C = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  accent: '\x1b[38;2;215;119;87m',
-  green: '\x1b[38;2;45;216;106m',
-  greenBg: '\x1b[48;2;20;50;25m\x1b[38;2;120;230;140m',
-  red: '\x1b[38;2;239;92;92m',
-  redBg: '\x1b[48;2;60;20;20m\x1b[38;2;255;140;140m',
-  blue: '\x1b[38;2;126;182;246m',
-  yellow: '\x1b[38;2;232;179;57m',
-  gold: '\x1b[38;2;236;184;78m',
-  cyan: '\x1b[38;2;124;246;255m',
-  gray: '\x1b[38;2;138;136;146m',
-  line: '\x1b[38;2;60;60;66m',
-  white: '\x1b[38;2;240;239;237m',
-  toolTag: '\x1b[38;2;70;190;120m',
-}
+const isTrueColor = Boolean(
+  (process.env.COLORTERM === 'truecolor' ||
+   process.env.COLORTERM === '24bit' ||
+   process.env.TERM_PROGRAM === 'iTerm.app' ||
+   process.env.TERM_PROGRAM === 'ghostty' ||
+   process.env.TERM_PROGRAM === 'vscode' ||
+   process.env.TERM_PROGRAM === 'WezTerm') &&
+  process.env.TERM_PROGRAM !== 'Apple_Terminal'
+)
+
+const C = isTrueColor
+  ? {
+      reset: '\x1b[0m',
+      bold: '\x1b[1m',
+      dim: '\x1b[2m',
+      accent: '\x1b[38;2;215;119;87m',
+      green: '\x1b[38;2;45;216;106m',
+      greenBg: '\x1b[48;2;20;50;25m\x1b[38;2;120;230;140m',
+      red: '\x1b[38;2;239;92;92m',
+      redBg: '\x1b[48;2;60;20;20m\x1b[38;2;255;140;140m',
+      blue: '\x1b[38;2;126;182;246m',
+      yellow: '\x1b[38;2;232;179;57m',
+      gold: '\x1b[38;2;236;184;78m',
+      cyan: '\x1b[38;2;124;246;255m',
+      gray: '\x1b[38;2;138;136;146m',
+      line: '\x1b[38;2;60;60;66m',
+      white: '\x1b[38;2;240;239;237m',
+      toolTag: '\x1b[38;2;70;190;120m',
+    }
+  : {
+      reset: '\x1b[0m',
+      bold: '\x1b[1m',
+      dim: '\x1b[2m',
+      accent: '\x1b[38;5;208m',
+      green: '\x1b[38;5;48m',
+      greenBg: '\x1b[48;5;22m\x1b[38;5;120m',
+      red: '\x1b[38;5;203m',
+      redBg: '\x1b[48;5;52m\x1b[38;5;210m',
+      blue: '\x1b[38;5;75m',
+      yellow: '\x1b[38;5;221m',
+      gold: '\x1b[38;5;214m',
+      cyan: '\x1b[38;5;81m',
+      gray: '\x1b[38;5;244m',
+      line: '\x1b[38;5;238m',
+      white: '\x1b[38;5;255m',
+      toolTag: '\x1b[38;5;71m',
+    }
 
 const SLASH_COMMANDS = [
   { cmd: '/help', desc: 'Show available slash commands and shortcuts' },
@@ -325,8 +354,13 @@ function getClipboardText() {
   }
 }
 
-const SEL_BG = '\x1b[48;2;60;80;110m\x1b[38;2;255;255;255m'
+const SEL_BG = isTrueColor
+  ? '\x1b[48;2;60;80;110m\x1b[38;2;255;255;255m'
+  : '\x1b[48;5;60m\x1b[38;5;255m'
 const SEL_RESET = '\x1b[0m'
+const CODE_BG = isTrueColor
+  ? '\x1b[48;2;36;36;42m'
+  : '\x1b[48;5;236m'
 
 function highlightAnsiLine(rawLine, startCol, endCol) {
   let visCol = 0
@@ -523,7 +557,7 @@ function formatInlineMarkdown(text) {
     .replace(/__([^_]+)__/g, `${C.bold}${C.white}$1${C.reset}`)
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, `\x1b[3m$1${C.reset}`)
     .replace(/(?<!_)_([^_]+)_(?!_)/g, `\x1b[3m$1${C.reset}`)
-    .replace(/`([^`]+)`/g, `\x1b[48;2;36;36;42m${C.yellow} $1 ${C.reset}`)
+    .replace(/`([^`]+)`/g, `${CODE_BG}${C.yellow} $1 ${C.reset}`)
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `${C.cyan}$1${C.reset} (${C.dim}$2${C.reset})`)
 }
 
@@ -722,11 +756,11 @@ function printConsoleUpdateNotice(info) {
   const cur = `v${VERSION}`
   const next = `v${info.latestVersion}`
   const line1 = `  💡 Update available: ${cur} → ${next}`
-  const line2 = `  Run \x1b[1m\x1b[38;2;240;239;237mapinex update\x1b[0m to install the latest version`
-  process.stderr.write(`\n\x1b[38;2;232;179;57m╭──────────────────────────────────────────────────────────╮\x1b[0m\n`)
-  process.stderr.write(`\x1b[38;2;232;179;57m│\x1b[0m${line1.padEnd(58)}\x1b[38;2;232;179;57m│\x1b[0m\n`)
-  process.stderr.write(`\x1b[38;2;232;179;57m│\x1b[0m${line2.padEnd(81)}\x1b[38;2;232;179;57m│\x1b[0m\n`)
-  process.stderr.write(`\x1b[38;2;232;179;57m╰──────────────────────────────────────────────────────────╯\x1b[0m\n\n`)
+  const line2 = `  Run ${C.bold}${C.white}apinex update${C.reset} to install the latest version`
+  process.stderr.write(`\n${C.yellow}╭──────────────────────────────────────────────────────────╮${C.reset}\n`)
+  process.stderr.write(`${C.yellow}│${C.reset}${line1.padEnd(58)}${C.yellow}│${C.reset}\n`)
+  process.stderr.write(`${C.yellow}│${C.reset}${line2.padEnd(81)}${C.yellow}│${C.reset}\n`)
+  process.stderr.write(`${C.yellow}╰──────────────────────────────────────────────────────────╯${C.reset}\n\n`)
 }
 
 function loadAuth() { return readJson(authFile(), null) }
