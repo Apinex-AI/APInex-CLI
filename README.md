@@ -54,6 +54,23 @@ Install globally using `npm` (requires Node.js 20+):
 npm install -g apinex-cli
 ```
 
+Or run instantly without installing:
+
+```sh
+npx apinex
+```
+
+> **Troubleshooting: `command not found: apinex`**  
+> If `apinex` is not found after running `npm install -g`, your shell needs npm's global bin directory in your `$PATH`. Run:
+> 
+> ```sh
+> # macOS (Zsh)
+> echo 'export PATH="$(npm prefix -g)/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+> 
+> # Linux / macOS (Bash)
+> echo 'export PATH="$(npm prefix -g)/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+> ```
+
 ---
 
 ## Quick Start
