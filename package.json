@@ -5,7 +5,7 @@
   "homepage": "https://apinex.bond/cli",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Apinex-AI/APInex-CLI.git"
+    "url": "git+https://github.com/Apinex-AI/APInex-CLI.git"
   },
   "bugs": {
     "url": "https://github.com/Apinex-AI/APInex-CLI/issues"
@@ -14,7 +14,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "apinex": "./bin/apinex.mjs"
+    "apinex": "bin/apinex.mjs"
   },
   "files": [
     "bin",
