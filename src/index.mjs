@@ -12,7 +12,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.2'
+const VERSION = '1.0.3'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -2794,7 +2794,15 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
         renderedBody.push(`   ${C.gray}${item.text}${C.reset}`)
         renderedBody.push('')
       } else if (item.role === 'error') {
-        renderedBody.push(`   ${C.red}✕ ${item.text}${C.reset}`)
+        const rawLines = String(item.text || '').split('\n')
+        rawLines.forEach((rawLine, lineIdx) => {
+          const wrapped = wrapText(rawLine, cols - 8)
+          wrapped.forEach((l, wrapIdx) => {
+            const isFirst = lineIdx === 0 && wrapIdx === 0
+            const prefix = isFirst ? ` ${C.red}✕${C.reset} ` : '   '
+            renderedBody.push(`${prefix}${C.red}${l}${C.reset}`)
+          })
+        })
         renderedBody.push('')
       }
     }
@@ -3459,10 +3467,12 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
         transcript.push({ role: 'notice', text: 'Cancelled.' })
       } else {
         let errText = err.message || String(err)
-        if (errText.includes('Insufficient balance')) {
-          errText += ' · Run /topup to add balance, or /model to switch to a free model.'
-        } else if (errText.includes('Subscription') || errText.includes('subscription') || errText.includes('allowance') || errText.includes('tokens used')) {
-          errText += ' · Run /subscriptions to upgrade plans, or /topup to add balance.'
+        if (!errText.startsWith('[APINEX]')) {
+          if (errText.includes('Insufficient balance')) {
+            errText += ' · Run /topup to add balance, or /model to switch to a free model.'
+          } else if (errText.includes('Subscription') || errText.includes('subscription') || errText.includes('allowance') || errText.includes('tokens used')) {
+            errText += ' · Run /subscriptions to upgrade plans, or /topup to add balance.'
+          }
         }
         transcript.push({ role: 'error', text: errText })
       }
