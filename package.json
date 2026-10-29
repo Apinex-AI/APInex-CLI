@@ -1,6 +1,6 @@
 {
   "name": "apinex-cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Zero-config autonomous terminal AI coding assistant & Unix CLI for APInex (OAuth 2.0 + PKCE, interactive TUI, native agent tools, crypto billing, Unix pipes)",
   "homepage": "https://apinex.bond/cli",
   "repository": {
@@ -29,7 +29,7 @@
   },
   "scripts": {
     "start": "node ./bin/apinex.mjs",
-    "test": "node --check ./bin/apinex.mjs && node --check ./src/index.mjs"
+    "test": "node --check ./bin/apinex.mjs && node --check ./src/index.mjs && node --test ./tests/*.test.mjs"
   },
   "keywords": [
     "apinex",

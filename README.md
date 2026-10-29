@@ -103,7 +103,7 @@ Usage:
   apinex login [--device]           Sign in via browser OAuth (or device code for SSH/servers)
   apinex account                    Show live USD balance, active plan, and RPM tier
   apinex topup [5|10|20|50]         Direct crypto top-up via NowPayments
-  apinex subscriptions [plan]       Browse & purchase free-model subscription plans
+  apinex subscriptions <plan>       Purchase a subscription by plan key or list price
   apinex rpm [30|60|100]            Upgrade RPM rate limit
   apinex init                       Scaffold APINEX.md project conventions & rules
   apinex update                     Check for updates and upgrade to latest version
@@ -155,7 +155,7 @@ Launch with `apinex` in any repository or project directory:
 | `/copy` | Copy last assistant answer to system clipboard |
 | `/account` | Refresh live wallet balance, active subscription, and rate limits |
 | `/topup [amt]` | Open NowPayments top-up picker ($5, $10, $20, $50 + bonuses) |
-| `/subscriptions` | Browse and activate free-model unlimited token pools |
+| `/subscriptions [plan-key|price]` | Browse free-model plans or create an invoice by key or list price |
 | `/rpm [rate]` | Upgrade RPM rate limit tier (30, 60, 100 RPM) |
 | `/compact` | Summarize and condense conversation context |
 | `/clear` | Clear screen and start a fresh session |
@@ -163,6 +163,16 @@ Launch with `apinex` in any repository or project directory:
 | `/login` | Re-authenticate or switch accounts |
 | `/logout` | Log out and remove local tokens |
 | `/exit` | Save session and exit cleanly |
+
+Subscription plans are loaded from the live billing options, including discounts and token bonuses.
+The default catalog offers $5 (10 days, 500M tokens), $10 (20 days, 1.1B), $30 (30 days, 5B),
+and $100 (30 days, 20B, 200 RPM, Best Value). The $20 plan is no longer sold; existing
+subscriptions remain unchanged. Availability and amounts may vary with server settings.
+
+Use a plan key such as `day30_ultra` or `day30_mega`, or the list price before discounts,
+for example `/subscriptions 30` or `apinex subscriptions 100`. A numeric selection denotes a
+price, not a duration; ambiguous or unavailable selections do not create invoices. Run
+`/subscriptions` without an argument in the TUI to browse the current plans and their keys.
 
 ### Keyboard Shortcuts
 

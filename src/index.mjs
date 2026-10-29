@@ -12,7 +12,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.3'
+const VERSION = '1.0.4'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -241,7 +241,7 @@ const SLASH_COMMANDS = [
   { cmd: '/help', desc: 'Show available slash commands and shortcuts' },
   { cmd: '/init', desc: 'Initialize APINEX.md project instructions & memory' },
   { cmd: '/topup', desc: 'Top up USD balance ($5, $10, $20, $50 + bonuses)' },
-  { cmd: '/subscriptions', desc: 'Browse and purchase free-model subscription plans' },
+  { cmd: '/subscriptions', desc: 'Browse plans or select by key or list price' },
   { cmd: '/rpm', desc: 'Upgrade RPM rate limits (30, 60, 100 RPM)' },
   { cmd: '/model', desc: 'Switch active APInex model' },
   { cmd: '/resume', desc: 'Browse and resume previous sessions' },
@@ -962,6 +962,38 @@ export function formatCompactCap(value) {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${+(n / 1_000).toFixed(1)}K`
   return String(Math.floor(n))
+}
+
+export function availableSubscriptionPlans(plans) {
+  if (!Array.isArray(plans)) return []
+  return plans.filter((plan) => plan && plan.enabled !== false && typeof plan.key === 'string' && plan.key.toLowerCase() !== 'day30_standard')
+}
+
+export function findSubscriptionPlan(plans, selection) {
+  if (typeof selection !== 'string') return null
+  const query = selection.trim().toLowerCase()
+  if (!query) return null
+
+  const available = availableSubscriptionPlans(plans)
+  const keys = available.filter((plan) => plan.key.toLowerCase() === query)
+  if (keys.length) return keys.length === 1 ? keys[0] : null
+
+  const price = /^\$?(\d+(?:\.\d{1,2})?)$/.exec(query)
+  if (price) {
+    const cents = Math.round(Number(price[1]) * 100)
+    const matches = available.filter((plan) => Number.isFinite(plan.listPriceCents) && plan.listPriceCents === cents)
+    return matches.length === 1 ? matches[0] : null
+  }
+
+  const labels = available.filter((plan) => typeof plan.label === 'string' && plan.label.toLowerCase() === query)
+  return labels.length === 1 ? labels[0] : null
+}
+
+export function formatSubscriptionPlanTag(plan) {
+  const tags = []
+  if (plan.isFeatured) tags.push('Best Value')
+  if (plan.finalPriceCents < plan.listPriceCents) tags.push(plan.discountLabel || 'Discounted')
+  return tags.map((tag) => `[${tag}]`).join(' ')
 }
 
 export function formatPlanQuota(account) {
@@ -2227,11 +2259,9 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
     renderScreen()
     try {
       billingData = await fetchBillingOptions()
+      if (billingData?.subscriptions) billingData.subscriptions.plans = availableSubscriptionPlans(billingData.subscriptions.plans)
       if (preselectedPlan) {
-        const norm = preselectedPlan.toLowerCase().replace(/[^a-z0-9_]/g, '')
-        const found = billingData?.subscriptions?.plans?.find(
-          (p) => p.key === norm || p.label.toLowerCase().includes(norm) || (norm === '10' && p.key === 'day10') || (norm === '20' && p.key === 'day20') || (norm === '30' && p.key === 'day30_standard')
-        )
+        const found = findSubscriptionPlan(billingData?.subscriptions?.plans, preselectedPlan)
         if (found) {
           await executeSubscriptionPayment(found.key)
           return
@@ -2239,7 +2269,7 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
       }
       mode = 'subscription-picker'
       subscriptionIndex = 0
-      statusNotice = ''
+      statusNotice = preselectedPlan ? 'Plan not found or ambiguous; select from the current list.' : ''
       renderScreen()
     } catch (err) {
       showNotice(`Failed to load subscriptions: ${err.message}`, 3000)
@@ -2506,6 +2536,7 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
 
       const screenLines = [topBar, '']
       screenLines.push(`  ${C.gray}Replaces daily 10M limit with massive 24/7 token pools for all free models.${C.reset}`)
+      if (statusNotice) screenLines.push(`  ${C.yellow}${statusNotice}${C.reset}`)
 
       const activeOffer = billingData?.subscriptions?.activeOffer
       if (activeOffer) {
@@ -2529,14 +2560,12 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
             bonusText = ` ${C.green}(+${formatCompactCap(p.bonusTokens)} bonus)${C.reset}`
           }
 
-          let tag = ''
-          if (p.isFeatured) tag = `  ${C.gold}[Featured · Ultra]${C.reset}`
-          else if (p.finalPriceCents < p.listPriceCents) {
-            tag = `  ${C.yellow}[${p.discountLabel || 'Discounted'}]${C.reset}`
-          }
+          const tagText = formatSubscriptionPlanTag(p)
+          const tag = tagText ? `  ${p.isFeatured ? C.gold : C.yellow}${tagText}${C.reset}` : ''
+          const rpm = p.rpmIncluded > 0 ? ` · ${p.rpmIncluded} RPM` : ''
 
-          screenLines.push(`  ${ptr} ${labelStyled} · ${priceStyled} · ${C.bold}${C.cyan}${tokenStr}${C.reset}${bonusText}${tag}`)
-          screenLines.push('')
+          screenLines.push(`  ${ptr} ${labelStyled} · ${priceStyled} · ${C.bold}${C.cyan}${tokenStr}${C.reset}${rpm}`)
+          screenLines.push(`    ${C.gray}key: ${p.key}${C.reset}${bonusText}${tag}`)
         })
       }
 
@@ -2935,7 +2964,7 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
       return
     }
     if (cmd === '/subscriptions' || cmd === '/subscription' || cmd === '/sub') {
-      await openSubscriptionPicker(arg)
+      await openSubscriptionPicker(parts.slice(1).join(' ') || null)
       return
     }
     if (cmd === '/rpm') {
@@ -4251,7 +4280,7 @@ Usage:
   apinex login                      Sign in with your APInex account via browser
   apinex account                    Show live USD balance & plan usage
   apinex topup [5|10|20|50]         Direct crypto top-up via NowPayments
-  apinex subscriptions [plan]       Purchase free-model subscription
+  apinex subscriptions <plan>       Purchase subscription by plan key or list price
   apinex rpm [30|60|100]            Upgrade RPM rate limit
   apinex init                       Initialize APINEX.md project memory & rules
   apinex update                     Update APInex CLI to latest version
@@ -4260,6 +4289,9 @@ Usage:
   apinex [-m <model>] "<prompt>"    One-shot prompt (reads stdin pipe if present)
   git diff | apinex commit-msg      Generate a commit message from piped diff
   apinex logout                     Log out and revoke CLI session
+
+Use /subscriptions in the TUI to browse current plans. Specify a plan key or list price
+(e.g. day30_mega or 100); numeric amounts refer to the list price before discounts.
 `)
 }
 
@@ -4358,10 +4390,14 @@ export async function main(argv) {
     return
   }
   if (cmd === 'subscriptions' || cmd === 'subscription' || cmd === 'sub') {
-    const plan = pos[1] || 'day10'
-    process.stderr.write(`Creating NowPayments subscription invoice for ${plan}…\n`)
-    const inv = await createSubscriptionInvoice(plan)
-    process.stdout.write(`Invoice URL: ${inv.invoiceUrl}\nPlan:        ${inv.planLabel || plan} ($${inv.amountUsd})\n`)
+    const selection = pos.slice(1).join(' ').trim()
+    if (!selection) throw new Error('Specify a plan key or list price, or use /subscriptions in the TUI to browse plans.')
+    const billing = await fetchBillingOptions()
+    const plan = findSubscriptionPlan(billing?.subscriptions?.plans, selection)
+    if (!plan) throw new Error('Subscription plan not found or ambiguous. Use /subscriptions in the TUI to browse current plans.')
+    process.stderr.write(`Creating NowPayments subscription invoice for ${plan.key}…\n`)
+    const inv = await createSubscriptionInvoice(plan.key)
+    process.stdout.write(`Invoice URL: ${inv.invoiceUrl}\nPlan:        ${inv.planLabel || plan.key} ($${inv.amountUsd})\n`)
     openBrowser(inv.invoiceUrl)
     return
   }
