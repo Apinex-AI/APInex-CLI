@@ -1,10 +1,21 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { execFileSync, execSync, spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  stripAnsi,
+  sanitizeTerminalOutput,
+  resolveSafePath,
+  isSensitiveFile,
+  isCommandSafe,
+  verifyNativeBinary,
+  sanitizeAppleScriptParam,
+  isPrivateHost,
+  ANSI_REGEX,
+} from './security.mjs'
 
 const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../bin/pasteboard')
 
@@ -12,7 +23,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.5'
+const VERSION = '1.0.6'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -94,9 +105,35 @@ function loadProjectRules(cwd = process.cwd()) {
       const full = join(current, name)
       if (existsSync(full)) {
         try {
-          const lstat = statSync(full)
+          const lstat = lstatSync(full)
           // Do not follow symlinks to prevent arbitrary local file inclusion
-          if (lstat.isFile()) {
+          if (lstat.isFile() && !lstat.isSymbolicLink()) {
+            // Also ensure no intermediate directory segment is a symlink
+            let hasSymlinkSegment = false
+            let checkPath = dirname(full)
+            while (checkPath.length >= current.length && checkPath !== current) {
+              if (lstatSync(checkPath).isSymbolicLink()) {
+                hasSymlinkSegment = true
+                break
+              }
+              const p = dirname(checkPath)
+              if (p === checkPath) break
+              checkPath = p
+            }
+            if (hasSymlinkSegment) continue
+
+            // Verify canonical path does not escape workspace root
+            let canonicalFull = full
+            let canonicalCurrent = current
+            try {
+              canonicalFull = realpathSync(full)
+              canonicalCurrent = realpathSync(current)
+            } catch {}
+            const rel = relative(canonicalCurrent, canonicalFull)
+            if (rel.startsWith('..') || isAbsolute(rel)) {
+              continue
+            }
+
             const content = readFileSync(full, 'utf8').trim()
             if (content) {
               return { file: name, fullPath: full, content }
@@ -106,7 +143,14 @@ function loadProjectRules(cwd = process.cwd()) {
       }
     }
     // Stop at git boundary, home directory, or filesystem root
-    if (existsSync(join(current, '.git')) || current === root || current === homedir()) break
+    let hasGit = false
+    try {
+      const entries = readdirSync(current)
+      hasGit = entries.some(e => e.toLowerCase() === '.git')
+    } catch {
+      hasGit = existsSync(join(current, '.git'))
+    }
+    if (hasGit || current === root || current === homedir()) break
     const parent = dirname(current)
     if (parent === current) break
     current = parent
@@ -279,7 +323,7 @@ const FUN_THINKING_PHRASES = [
 ]
 
 function readNativeClipboard() {
-  if (process.platform === 'darwin' && existsSync(NATIVE_PASTEBOARD)) {
+  if (process.platform === 'darwin' && existsSync(NATIVE_PASTEBOARD) && verifyNativeBinary(NATIVE_PASTEBOARD)) {
     try {
       const out = execFileSync(NATIVE_PASTEBOARD, { encoding: 'utf8', timeout: 800, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
       if (out.startsWith('IMAGE:')) {
@@ -356,6 +400,28 @@ function getClipboardText() {
   }
 }
 
+function getLatestClipboardContent() {
+  const native = readNativeClipboard()
+  if (native) {
+    if (native.type === 'text' && native.text) return { type: 'text', text: native.text }
+    if (native.type === 'image' && native.base64) return { type: 'image', base64: native.base64, mediaType: 'image/png' }
+  }
+
+  // Standard platform text check first
+  const text = getClipboardText()
+  if (text && text.length > 0) {
+    return { type: 'text', text }
+  }
+
+  // If no text, check image
+  const img = getClipboardImageBase64()
+  if (img?.base64) {
+    return { type: 'image', base64: img.base64, mediaType: img.mediaType || 'image/png' }
+  }
+
+  return null
+}
+
 const SEL_BG = isTrueColor
   ? '\x1b[48;2;60;80;110m\x1b[38;2;255;255;255m'
   : '\x1b[48;5;60m\x1b[38;5;255m'
@@ -365,30 +431,61 @@ const CODE_BG = isTrueColor
   : '\x1b[48;5;236m'
 
 function highlightAnsiLine(rawLine, startCol, endCol) {
-  let visCol = 0
-  let startIdx = -1
-  let endIdx = -1
-  let i = 0
+  if (!rawLine || startCol >= endCol) return rawLine
 
-  while (i < rawLine.length) {
-    if (rawLine[i] === '\x1b' && rawLine[i + 1] === '[') {
-      const ANSI_P_RE = new RegExp(`^${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`)
-      const m = rawLine.slice(i).match(ANSI_P_RE)
-      if (m) {
-        i += m[0].length
-        continue
+  let result = ''
+  let visCol = 0
+  let inSelection = false
+  let lastIndex = 0
+
+  const tokens = []
+  let match
+  const re = new RegExp(ANSI_REGEX.source, 'g')
+  while ((match = re.exec(rawLine)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({ type: 'text', str: rawLine.slice(lastIndex, match.index) })
+    }
+    tokens.push({ type: 'ansi', str: match[0] })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < rawLine.length) {
+    tokens.push({ type: 'text', str: rawLine.slice(lastIndex) })
+  }
+
+  for (const token of tokens) {
+    if (token.type === 'ansi') {
+      let code = token.str
+      if (inSelection) {
+        // If an ANSI reset occurs inside selection, re-apply selection background immediately
+        if (/^\x1b\[(?:0)?m$/.test(code)) {
+          code = code + SEL_BG
+        } else if (/^\x1b\[(?:4[0-7]|10[0-7]|48;)/.test(code)) {
+          // Suppress conflicting background colors while in selection so SEL_BG wins
+          code = ''
+        }
+      }
+      result += code
+    } else {
+      for (const ch of token.str) {
+        const shouldSelect = visCol >= startCol && visCol < endCol
+        if (shouldSelect && !inSelection) {
+          result += SEL_BG
+          inSelection = true
+        } else if (!shouldSelect && inSelection) {
+          result += SEL_RESET
+          inSelection = false
+        }
+        result += ch
+        visCol += 1
       }
     }
-    if (visCol === startCol && startIdx === -1) startIdx = i
-    if (visCol === endCol && endIdx === -1) endIdx = i
-    visCol += 1
-    i += 1
   }
-  if (startIdx === -1) startIdx = i
-  if (endIdx === -1) endIdx = i
-  if (startIdx >= endIdx) return rawLine
 
-  return rawLine.slice(0, startIdx) + SEL_BG + rawLine.slice(startIdx, endIdx) + SEL_RESET + rawLine.slice(endIdx)
+  if (inSelection) {
+    result += SEL_RESET
+  }
+
+  return result
 }
 
 function applyVisualSelection(lines, start, end) {
@@ -546,6 +643,7 @@ export {
   wrapText,
   computeLineDiff,
   stripAnsi,
+  sanitizeTerminalOutput,
   parseSemver,
   isNewerVersion,
   parseContextTokens,
@@ -559,6 +657,10 @@ export {
   loadProjectRules,
   saveSessionFile,
   loadSessionFile,
+  isSensitiveFile,
+  isCommandSafe,
+  verifyNativeBinary,
+  sanitizeAppleScriptParam,
 }
 
 function formatInlineMarkdown(text) {
@@ -672,10 +774,6 @@ function estimateTokens(messages) {
 }
 
 const CTRL_RE = new RegExp(`[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`, 'g')
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[a-zA-Z]`, 'g')
-function stripAnsi(s) {
-  return String(s ?? '').replace(ANSI_RE, '')
-}
 
 function configDir() {
   if (process.platform === 'win32') {
@@ -1063,7 +1161,7 @@ function openBrowser(url) {
     const [cmd, args] = process.platform === 'darwin'
       ? ['open', [url]]
       : process.platform === 'win32'
-      ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+      ? ['cmd.exe', ['/c', 'start', '""', url]]
       : ['xdg-open', [url]]
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
     child.on('error', () => { /* prevent unhandled error event on headless environments */ })
@@ -1098,25 +1196,37 @@ function saveTokenResponse(tokens) {
   })
 }
 
+let activeRefreshPromise = null
+
 async function ensureAccessToken() {
   const auth = loadAuth()
   if (!auth?.accessToken) throw new Error('Not signed in. Run `apinex login`.')
   if (auth.expiresAt && Date.now() < auth.expiresAt - 30_000) return auth.accessToken
   if (!auth.refreshToken) throw new Error('Session expired. Run `apinex login`.')
-  try {
-    const refreshed = await postOAuth('/api/cli/oauth/token', {
-      grant_type: 'refresh_token',
-      client_id: CLIENT_ID,
-      refresh_token: auth.refreshToken,
-    })
-    saveTokenResponse(refreshed)
-    return refreshed.access_token
-  } catch (err) {
-    if (existsSync(authFile())) {
-      try { rmSync(authFile(), { force: true }) } catch { /* ignore */ }
+
+  if (activeRefreshPromise) return activeRefreshPromise
+
+  activeRefreshPromise = (async () => {
+    try {
+      const refreshed = await postOAuth('/api/cli/oauth/token', {
+        grant_type: 'refresh_token',
+        client_id: CLIENT_ID,
+        refresh_token: auth.refreshToken,
+      })
+      saveTokenResponse(refreshed)
+      return refreshed.access_token
+    } catch (err) {
+      const isFatalAuthError = err.code === 'invalid_grant' || err.code === 'unauthorized_client'
+      if (isFatalAuthError && existsSync(authFile())) {
+        try { rmSync(authFile(), { force: true }) } catch { /* ignore */ }
+      }
+      throw new Error(`Session expired (${err.message}). Run \`apinex login\` to sign in again.`)
+    } finally {
+      activeRefreshPromise = null
     }
-    throw new Error(`Session expired (${err.message}). Run \`apinex login\` to sign in again.`)
-  }
+  })()
+
+  return activeRefreshPromise
 }
 
 async function refreshModels(token) {
@@ -1162,7 +1272,20 @@ async function loginBrowser({ silent = false } = {}) {
         res.writeHead(405).end()
         return
       }
-      const url = new URL(req.url || '/', 'http://127.0.0.1')
+      if (port > 0) {
+        const reqHost = req.headers.host
+        if (reqHost && reqHost !== `127.0.0.1:${port}` && reqHost !== `localhost:${port}`) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' }).end('Forbidden: Invalid Host header.')
+          return
+        }
+      }
+      let url
+      try {
+        url = new URL(req.url || '/', 'http://127.0.0.1')
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain' }).end('Malformed request URL.')
+        return
+      }
       if (url.pathname !== '/callback') {
         res.writeHead(404).end()
         return
@@ -1178,7 +1301,12 @@ async function loginBrowser({ silent = false } = {}) {
       }
 
       if (err) {
-        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.writeHead(400, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': "default-src 'none'",
+          'X-Frame-Options': 'DENY',
+          'X-Content-Type-Options': 'nosniff',
+        })
         res.end('<!doctype html><body style="font:15px system-ui;background:#111113;color:#ef5c5c;display:grid;place-items:center;height:90vh"><div>Authentication failed or was denied. You can close this tab.</div></body>')
         if (!resolved) {
           resolved = true
@@ -1195,7 +1323,13 @@ async function loginBrowser({ silent = false } = {}) {
         return
       }
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'none'",
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      })
       res.end('<!doctype html><meta charset="utf-8"><body style="font:15px system-ui;background:#111113;color:#f0efed;display:grid;place-items:center;height:90vh"><div>APInex CLI connected. You can close this tab.</div></body>')
       if (!resolved) {
         resolved = true
@@ -1205,6 +1339,7 @@ async function loginBrowser({ silent = false } = {}) {
       }
     })
     server.on('error', (e) => {
+      clearTimeout(timer)
       if (!resolved) {
         resolved = true
         reject(new Error(`OAuth callback server error: ${e.message}`))
@@ -1219,6 +1354,7 @@ async function loginBrowser({ silent = false } = {}) {
         reject(new Error('Login timed out. Run `apinex login --device` for headless login.'))
       }
     }, 180_000)
+    timer.unref()
     server.listen(0, '127.0.0.1', () => {
       port = server.address().port
       const redirectUri = `http://127.0.0.1:${port}/callback`
@@ -1351,7 +1487,15 @@ async function checkPaymentStatus(type, paymentId) {
 async function readStdin() {
   if (process.stdin.isTTY) return ''
   const chunks = []
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  let total = 0
+  const maxBytes = 20 * 1024 * 1024 // 20 MB hard limit
+  for await (const chunk of process.stdin) {
+    total += chunk.length
+    if (total > maxBytes) {
+      throw new Error('Standard input exceeds maximum allowed limit of 20 MB')
+    }
+    chunks.push(Buffer.from(chunk))
+  }
   return Buffer.concat(chunks).toString('utf8').trim()
 }
 
@@ -1486,7 +1630,8 @@ function sendOsNotification({ title = 'APInex CLI', message = '', sound = 'Glass
 
   try {
     if (process.platform === 'darwin') {
-      const soundClause = sound ? ` sound name "${sound}"` : ''
+      const safeSound = sanitizeAppleScriptParam(sound)
+      const soundClause = safeSound ? ` sound name "${safeSound}"` : ''
       const script = `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}${soundClause}`
       const p = spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true })
       p.on('error', () => {})
@@ -1515,18 +1660,7 @@ $n.Item(1).AppendChild($t.CreateTextNode($Message)) | Out-Null
   }
 }
 
-function resolveSafePath(p, allowedRoot = process.cwd()) {
-  const target = isAbsolute(p) ? resolve(p) : resolve(allowedRoot, p)
-  const rel = relative(allowedRoot, target)
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`Access denied: path "${p}" escapes workspace root (${allowedRoot})`)
-  }
-  const parts = target.split(/[\\/]/)
-  if (parts.includes('.git') && (parts.includes('hooks') || parts.includes('config'))) {
-    throw new Error(`Access denied: modifying .git internal hooks or config is forbidden.`)
-  }
-  return target
-}
+
 
 async function toolGrepSearch({ query, path: searchPath, case_sensitive }) {
   if (!query) throw new Error('Query parameter is required')
@@ -1694,6 +1828,9 @@ async function toolFindFiles({ pattern, directory }) {
 async function executeTool(name, args, { requestPermission } = {}) {
   if (name === 'write_file') {
     const target = resolveSafePath(args.path)
+    if (isSensitiveFile(target) && requestPermission) {
+      await requestPermission(`write_file: ${args.path}`)
+    }
     const content = String(args.content ?? '')
     const exists = existsSync(target)
     let oldContent = ''
@@ -1717,6 +1854,9 @@ async function executeTool(name, args, { requestPermission } = {}) {
 
   if (name === 'edit_file') {
     const target = resolveSafePath(args.path)
+    if (isSensitiveFile(target) && requestPermission) {
+      await requestPermission(`edit_file: ${args.path}`)
+    }
     if (!existsSync(target)) throw new Error(`File not found: ${args.path}`)
     const st = statSync(target)
     if (!st.isFile()) throw new Error(`Cannot edit: ${args.path} is not a regular file`)
@@ -1832,8 +1972,7 @@ async function executeTool(name, args, { requestPermission } = {}) {
     }
     // Disallow loopback / private IP SSRF in curl fallback
     const hostname = parsedUrl.hostname.toLowerCase()
-    const isPrivate = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\])$/i.test(hostname)
-    if (isPrivate) {
+    if (isPrivateHost(hostname)) {
       throw new Error(`Access to local or private network address "${hostname}" is forbidden for security.`)
     }
 
@@ -1865,12 +2004,13 @@ async function executeTool(name, args, { requestPermission } = {}) {
     try {
       const raw = execFileSync('curl', [
         '--proto', '=http,https',
-        '--proto-redir', '=http,https',
+        '--proto-redir', '=https',
+        '--max-redirs', '3',
         '-sL',
         '--max-time', '10',
+        '-A', 'Mozilla/5.0',
         '--',
         parsedUrl.toString(),
-        '-A', 'Mozilla/5.0',
       ], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
       const text = raw.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
@@ -1888,7 +2028,7 @@ async function executeTool(name, args, { requestPermission } = {}) {
 
   if (name === 'bash') {
     const cmd = String(args.command ?? '')
-    if (requestPermission) {
+    if (requestPermission && !isCommandSafe(cmd)) {
       await requestPermission(cmd)
     }
     try {
@@ -2052,7 +2192,7 @@ async function streamPrompt({ model, system, prompt }) {
     model,
     messages,
     onDelta: (d) => {
-      if (d.type === 'content') process.stdout.write(d.delta)
+      if (d.type === 'content') process.stdout.write(sanitizeTerminalOutput(d.delta))
     },
   })
   process.stdout.write('\n')
@@ -2559,13 +2699,11 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
 
   const requestPermission = (cmd) => {
     if (alwaysAllowDestructive) return Promise.resolve(true)
-    const norm = String(cmd || '').replace(/\\/g, '').replace(/['"]/g, '')
-    const DESTRUCTIVE_CMD_RE = /(?:^|[;&|`$()\n\r]\s*|\b)(rm\s+|rmdir\b|unlink\s+|shred\s+|del\s+|erase\s+|git\s+(?:reset|clean|restore|checkout\b)|git\s+push\s+.*(?:--force|-f)|drop\s+(?:table|database)|kill\b|pkill\b|killall\b|truncate\s+|dd\s+|mkfs\b|chmod\b|chown\b|mv\s+.*(?:\/dev\/null|\.\.)|(?:sh|bash|zsh|eval|exec)\s+-[ce]|\bcurl\b.*\|\s*(?:ba|z)?sh|\bwget\b.*\|\s*(?:ba|z)?sh|>\s*\/)/i
-    if (!DESTRUCTIVE_CMD_RE.test(norm)) return Promise.resolve(true)
+    if (isCommandSafe(cmd)) return Promise.resolve(true)
 
     sendOsNotification({
       title: 'APInex CLI · Approval Required',
-      message: `Permission needed: ${cmd.slice(0, 80)}`,
+      message: `Permission needed: ${stripAnsi(String(cmd || '')).slice(0, 80)}`,
       sound: 'Basso',
     })
 
@@ -2941,8 +3079,9 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
       // Status line placed above the divider and input box while generating/working,
       // replaced with Permission Prompt above the divider when permission is required
       if (mode === 'permission-prompt' && pendingPermission) {
-        footerLines.push(` ${C.yellow}⚠ Permission Required${C.reset} · ${C.bold}Allow execution of command?${C.reset}`)
-        footerLines.push(`   ${C.bold}${C.white}${pendingPermission.cmd}${C.reset}`)
+        const cleanCmd = stripAnsi(String(pendingPermission.cmd || '')).replace(/[\r\n\t]/g, ' ')
+        footerLines.push(` ${C.yellow}⚠ Permission Required${C.reset} · ${C.bold}Allow execution?${C.reset}`)
+        footerLines.push(`   ${C.bold}${C.white}${cleanCmd}${C.reset}`)
         footerLines.push(` ${C.gray}[${C.green}y${C.gray}] Allow once  ·  [${C.blue}a${C.gray}] Always allow this session  ·  [${C.red}n${C.gray}] Deny (Esc)${C.reset}`)
       } else if (isStreaming || isExecutingQueue) {
         const frame = spinnerFrames[spinnerTick % spinnerFrames.length]
@@ -2977,8 +3116,9 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
 
       footerLines.push(hr)
 
+      const cleanNotice = String(statusNotice || '').replace(/^✓\s*/, '')
       const rightNotice = statusNotice
-        ? `${C.green}✓ ${statusNotice}${C.reset}`
+        ? `${C.green}✓ ${cleanNotice}${C.reset}`
         : `${C.gray}Context: ${contextMeter} · ${C.white}/help${C.gray} for commands${C.reset}`
       footerLines.push(`   ${rightNotice}`)
     }
@@ -3188,11 +3328,7 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
         })
         statusNotice = `Updating to v${info.latestVersion}…`
         renderScreen()
-        try {
-          execSync('npm install -g apinex-cli@latest', { stdio: 'pipe', encoding: 'utf8', timeout: 60000 })
-        } catch {
-          execSync('npm install -g apinex@latest', { stdio: 'pipe', encoding: 'utf8', timeout: 60000 })
-        }
+        execSync('npm install -g apinex-cli@latest', { stdio: 'pipe', encoding: 'utf8', timeout: 60000 })
         availableUpdate = null
         transcript.push({
           role: 'notice',
@@ -3879,6 +4015,10 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
             } else if (btn === 0 || btn === 32) {
               if (!mouseDragStart) {
                 mouseDragStart = { col, row }
+                if (selectionRange) {
+                  selectionRange = null
+                  renderScreen()
+                }
               } else if (Math.abs(col - mouseDragStart.col) > 0 || Math.abs(row - mouseDragStart.row) > 0) {
                 isMouseDragging = true
                 selectionRange = { start: mouseDragStart, end: { col, row } }
@@ -3891,11 +4031,15 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
               if (sel && sel.trim().length > 0) {
                 copyToClipboard(sel)
                 showNotice(`✓ Copied ${sel.length} characters to clipboard`, 2000)
+                selectionRange = { start: mouseDragStart, end: { col, row } }
+              } else {
+                selectionRange = null
               }
+            } else if (!isMouseDragging) {
+              selectionRange = null
             }
             mouseDragStart = null
             isMouseDragging = false
-            selectionRange = null
             renderScreen()
           }
         }
@@ -3909,6 +4053,18 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
       }
 
       if (seq === '\x03') {
+        if (selectionRange && lastRenderedLines.length > 0) {
+          const sel = extractSelectedText(lastRenderedLines, selectionRange.start, selectionRange.end)
+          selectionRange = null
+          isMouseDragging = false
+          mouseDragStart = null
+          if (sel && sel.trim().length > 0) {
+            copyToClipboard(sel)
+            showNotice(`✓ Copied ${sel.length} characters to clipboard`, 2000)
+            renderScreen()
+            return
+          }
+        }
         if (pendingPermission) {
           const rej = pendingPermission.reject
           pendingPermission = null
@@ -4255,6 +4411,11 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
         return
       }
       if (seq === '\x1b') {
+        if (selectionRange) {
+          selectionRange = null
+          renderScreen()
+          return
+        }
         if (atFiles.length > 0) {
           input = input.slice(0, cursor) + ' ' + input.slice(cursor)
           cursor += 1
@@ -4294,22 +4455,21 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
         return
       }
 
-      // Ctrl+V: Check clipboard image first, then text
+      // Ctrl+V: Paste latest item from clipboard (text or image) without artificial bias
       if (seq === '\x16') {
-        const img = getClipboardImageBase64()
-        if (img) {
+        const item = getLatestClipboardContent()
+        if (item?.type === 'image') {
           const tag = `[Image #${imagesStore.length + 1}]`
           if (imagesStore.length >= 20) imagesStore.shift()
-          imagesStore.push({ tag, base64: img.base64, mediaType: img.mediaType })
+          imagesStore.push({ tag, base64: item.base64, mediaType: item.mediaType })
           isBrowsingHistory = false
           input = input.slice(0, cursor) + tag + input.slice(cursor)
           cursor += tag.length
           showNotice(`Pasted ${tag}`)
           return
         }
-        const text = getClipboardText()
-        if (text) {
-          const cleanText = stripAnsi(text).replace(/[\r\n\x00-\x1f\x7f]/g, ' ').trim()
+        if (item?.type === 'text' && item.text) {
+          const cleanText = stripAnsi(item.text).replace(/[\r\n\x00-\x1f\x7f]/g, ' ').trim()
           isBrowsingHistory = false
           input = input.slice(0, cursor) + cleanText + input.slice(cursor)
           cursor += cleanText.length
@@ -4637,17 +4797,8 @@ export async function main(argv) {
     process.stdout.write(`New version available: v${VERSION} → v${info.latestVersion}\n`)
     if (info.changelog) process.stdout.write(`Changelog: ${info.changelog}\n`)
     process.stdout.write(`Updating APInex CLI…\n`)
-    try {
-      execSync('npm install -g apinex-cli@latest', { stdio: 'inherit', timeout: 60000 })
-      process.stdout.write(`✓ Successfully updated to v${info.latestVersion}!\n`)
-    } catch {
-      try {
-        execSync('npm install -g apinex@latest', { stdio: 'inherit', timeout: 60000 })
-        process.stdout.write(`✓ Successfully updated to v${info.latestVersion}!\n`)
-      } catch (err) {
-        process.stderr.write(`Update failed: ${err.message}\nRun manually: npm install -g apinex-cli@latest\n`)
-      }
-    }
+    execSync('npm install -g apinex-cli@latest', { stdio: 'inherit', timeout: 60000 })
+    process.stdout.write(`✓ Successfully updated to v${info.latestVersion}!\n`)
     return
   }
   if (cmd === 'init') {
