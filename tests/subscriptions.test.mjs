@@ -11,7 +11,8 @@ const plans = [
   { key: 'day30_ultra', label: '30 days', listPriceCents: 3000, finalPriceCents: 2400, discountLabel: '20% off' },
   { key: 'day30_mega', label: '30 days', listPriceCents: 10000, finalPriceCents: 8000, discountLabel: '20% off', isFeatured: true, tokenLimit: 20_000_000_000, rpmIncluded: 200 },
 ]
-const retired = { key: 'day30_standard', label: '30 days', listPriceCents: 2000, finalPriceCents: 2000 }
+const standard = { key: 'day30_standard', label: '30 days', listPriceCents: 2000, finalPriceCents: 2000 }
+const disabled = { ...standard, enabled: false }
 
 test('selection uses unique live list prices and exact keys, not partial labels or discounts', () => {
   const reversed = [...plans].reverse()
@@ -30,10 +31,13 @@ test('selection uses unique live list prices and exact keys, not partial labels 
   assert.equal(findSubscriptionPlan([...plans, { ...plans[2], listPriceCents: 2400, enabled: false }], '24'), null)
 })
 
-test('retired $20 plan is never offered, even by an old server', () => {
-  assert.deepEqual(availableSubscriptionPlans([...plans, retired]), plans)
-  assert.equal(findSubscriptionPlan([...plans, retired], 'day30_standard'), null)
-  assert.equal(findSubscriptionPlan([...plans, retired], '20'), null)
+test('enabled server plans are offered and disabled plans stay hidden', () => {
+  assert.deepEqual(availableSubscriptionPlans([...plans, standard, disabled]), [...plans, standard])
+  assert.equal(findSubscriptionPlan([...plans, standard], 'day30_standard')?.key, 'day30_standard')
+  assert.equal(findSubscriptionPlan([...plans, standard], '20')?.key, 'day30_standard')
+  assert.equal(findSubscriptionPlan([...plans, disabled], 'day30_standard'), null)
+  assert.equal(findSubscriptionPlan([...plans, disabled], '20'), null)
+  assert.equal(findSubscriptionPlan([...plans, { key: '', listPriceCents: 100 }], '1'), null)
 })
 
 test('featured and discount tags coexist, and existing subscriptions keep their stored quota', () => {
@@ -59,7 +63,7 @@ test('CLI resolves against billing options and never posts an ambiguous or missi
     globalThis.fetch = async (url, options = {}) => {
       requests.push({ url, options })
       if (url.endsWith('/api/cli/billing/options')) {
-        return new Response(JSON.stringify({ subscriptions: { plans: [...plans, retired] } }))
+        return new Response(JSON.stringify({ subscriptions: { plans: [...plans, standard, disabled] } }))
       }
       if (url.endsWith('/api/cli/billing/subscription')) {
         return new Response(JSON.stringify({ error: 'mock invoice refusal' }), { status: 400 })
@@ -68,11 +72,11 @@ test('CLI resolves against billing options and never posts an ambiguous or missi
     }
     await assert.rejects(main(['subscriptions']), /Specify a plan/)
     assert.equal(requests.length, 0)
-    for (const choice of ['20', 'day30_standard', '30 days', '24']) {
+    for (const choice of ['30 days', '24']) {
       await assert.rejects(main(['subscriptions', choice]), /not found or ambiguous/)
     }
     assert.equal(requests.filter((r) => r.url.endsWith('/subscription')).length, 0)
-    for (const [choice, key] of [['30', 'day30_ultra'], ['DAY30_MEGA', 'day30_mega'], ['10', 'day20']]) {
+    for (const [choice, key] of [['30', 'day30_ultra'], ['DAY30_MEGA', 'day30_mega'], ['10', 'day20'], ['20', 'day30_standard'], ['day30_standard', 'day30_standard']]) {
       await assert.rejects(main(['subscriptions', choice]), /mock invoice refusal/)
       const request = requests.at(-1)
       assert.ok(request.url.endsWith('/api/cli/billing/subscription'))
@@ -93,7 +97,7 @@ test('TUI shows the mega offer and does not pay for an invalid selection', { tim
   const { createServer } = await import('node:http')
   const tmp = mkdtempSync(join(tmpdir(), 'apinex-tui-test-'))
   const seen = []
-  const options = [...plans, retired].map((p) => ({
+  const options = [...plans, standard, disabled].map((p) => ({
     ...p,
     kind: 'custom',
     tokenLimit: p.tokenLimit ?? 500000000,
@@ -143,8 +147,8 @@ test('TUI shows the mega offer and does not pay for an invalid selection', { tim
     await wait(() => output.includes('Plan not found or ambiguous'))
     assert.match(output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, ""), /20B tokens · 200 RPM/)
     assert.match(output, /key: day30_mega/)
+    assert.match(output, /key: day30_standard/)
     assert.match(output, /\[Best Value\] \[20% off\]/)
-    assert.doesNotMatch(output, /key: day30_standard/)
     assert.equal(seen.filter((url) => url === '/api/cli/billing/subscription').length, 0)
   } finally {
     if (child && child.exitCode === null) {

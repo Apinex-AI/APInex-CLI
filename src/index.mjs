@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { execFileSync, execSync, spawn } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { setDefaultAutoSelectFamily } from 'node:net'
+import { setDefaultResultOrder } from 'node:dns'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,11 +21,19 @@ import {
 
 const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../bin/pasteboard')
 
+// Windows Node tries IPv6 first and reports a bare "fetch failed" when the
+// laptop has no working IPv6 route. Browsers fall back to IPv4, so the site
+// loads while every CLI request to api.apinex.bond dies after the callback.
+if (process.platform === 'win32') {
+  try { setDefaultResultOrder('ipv4first') } catch { /* ignore */ }
+  try { setDefaultAutoSelectFamily(false) } catch { /* ignore */ }
+}
+
 // Locked to APInex only
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.7'
+const VERSION = '1.0.8'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -792,10 +802,25 @@ function readJson(file, fallback) {
   }
 }
 
+export function describeNetworkError(err) {
+  const cause = err?.cause
+  const code = cause?.code || err?.code
+  const detail = [code, cause?.message && cause.message !== err?.message ? cause.message : '']
+    .filter(Boolean)
+    .join(': ')
+  const message = err?.message || String(err)
+  return detail && !message.includes(detail) ? `${message} (${detail})` : message
+}
+
 function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
-  return fetch(url, { ...options, signal })
+  return fetch(url, { ...options, signal }).catch((err) => {
+    const wrapped = new Error(describeNetworkError(err))
+    wrapped.code = err?.cause?.code || err?.code
+    wrapped.cause = err
+    throw wrapped
+  })
 }
 
 function writeSecretJson(file, value) {
@@ -1103,7 +1128,7 @@ export function formatCompactCap(value) {
 
 export function availableSubscriptionPlans(plans) {
   if (!Array.isArray(plans)) return []
-  return plans.filter((plan) => plan && plan.enabled !== false && typeof plan.key === 'string' && plan.key.toLowerCase() !== 'day30_standard')
+  return plans.filter((plan) => plan && plan.enabled !== false && typeof plan.key === 'string' && plan.key.length > 0)
 }
 
 export function findSubscriptionPlan(plans, selection) {
@@ -1414,7 +1439,7 @@ async function loginBrowser({ silent = false } = {}) {
     redirect_uri: code.redirectUri,
   })
   saveTokenResponse(tokens)
-  await refreshModels(tokens.access_token)
+  await refreshModels(tokens.access_token).catch(() => [])
   if (!silent) printAccount(tokens.account)
   return tokens.account
 }
@@ -1435,7 +1460,7 @@ async function loginDevice() {
         device_code: start.device_code,
       })
       saveTokenResponse(tokens)
-      await refreshModels(tokens.access_token)
+      await refreshModels(tokens.access_token).catch(() => [])
       printAccount(tokens.account)
       return tokens.account
     } catch (err) {
@@ -2911,7 +2936,13 @@ async function startInteractiveTui(initialModel, { resumeSession, pickResume } =
       if (!plans.length) {
         screenLines.push(`    ${C.gray}No subscription plans available.${C.reset}`)
       } else {
-        plans.forEach((p, idx) => {
+        const room = Math.max(2, rows - screenLines.length - 1)
+        const maxPlans = Math.max(1, Math.floor(room / 2))
+        const start = plans.length > maxPlans
+          ? Math.max(0, Math.min(currentIdx - Math.floor(maxPlans / 2), plans.length - maxPlans))
+          : 0
+        plans.slice(start, start + maxPlans).forEach((p, offset) => {
+          const idx = start + offset
           const sel = idx === currentIdx
           const ptr = sel ? `${C.accent}❯${C.reset}` : ' '
           const labelStyled = sel ? `${C.bold}${C.white}${p.label.padEnd(9)}${C.reset}` : `${C.white}${p.label.padEnd(9)}${C.reset}`

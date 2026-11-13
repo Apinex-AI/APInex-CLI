@@ -12,6 +12,13 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as mod from '../src/index.mjs'
+
+test('network errors keep the underlying cause code', () => {
+  const err = new TypeError('fetch failed')
+  err.cause = Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' })
+  assert.equal(mod.describeNetworkError(err), 'fetch failed (ETIMEDOUT: connect ETIMEDOUT)')
+  assert.equal(mod.describeNetworkError(new Error('HTTP 401')), 'HTTP 401')
+})
 import * as security from '../src/security.mjs'
 
 test('Security Audit Fixes Validation', async (t) => {

@@ -168,9 +168,8 @@ Launch with `apinex` in any repository or project directory:
 | `/exit` | Save session and exit cleanly |
 
 Subscription plans are loaded from the live billing options, including discounts and token bonuses.
-The default catalog offers $5 (10 days, 500M tokens), $10 (20 days, 1.1B), $30 (30 days, 5B),
-and $100 (30 days, 20B, 200 RPM, Best Value). The $20 plan is no longer sold; existing
-subscriptions remain unchanged. Availability and amounts may vary with server settings.
+Every plan the server marks as enabled is shown, so catalog changes appear in the CLI without a release.
+Plans with `enabled: false` stay hidden. Existing subscriptions remain unchanged.
 
 Use a plan key such as `day30_ultra` or `day30_mega`, or the list price before discounts,
 for example `/subscriptions 30` or `apinex subscriptions 100`. A numeric selection denotes a
