@@ -23,7 +23,7 @@ const NATIVE_PASTEBOARD = resolve(dirname(fileURLToPath(import.meta.url)), '../b
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.6'
+const VERSION = '1.0.7'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
 
@@ -651,6 +651,7 @@ export {
   generateApinexMd,
   resolveSafePath,
   openBrowser,
+  browserOpenPlan,
   createTopupInvoice,
   renderDiff,
   executeTool,
@@ -1155,20 +1156,52 @@ function printAccount(account) {
   )
 }
 
+function browserOpenPlan(url, platform = process.platform) {
+  if (platform === 'darwin') {
+    return { command: 'open', args: [url], options: { detached: true, stdio: 'ignore' } }
+  }
+  if (platform === 'win32') {
+    // cmd.exe splits unquoted `&` into extra commands and expands `%VAR%` even
+    // inside quotes. An OAuth URL has both (`&code_challenge=…`, `%3A` in the
+    // redirect), so the browser used to open a truncated link and the leftover
+    // `code_challenge` token failed as "not recognized … or batch file".
+    // Keep the URL in the environment and expand it inside quotes: `&` stays
+    // inside the quoted argument, and cmd does not re-expand `%` in the value.
+    if (/[\r\n\0"]/.test(url)) {
+      throw new Error('Refusing to open a URL with command-line metacharacters')
+    }
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', 'start "" "%APINEX_OPEN_URL%"'],
+      options: {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+        env: { ...process.env, APINEX_OPEN_URL: url },
+      },
+    }
+  }
+  return { command: 'xdg-open', args: [url], options: { detached: true, stdio: 'ignore' } }
+}
+
 function openBrowser(url) {
   if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
   try {
-    const [cmd, args] = process.platform === 'darwin'
-      ? ['open', [url]]
-      : process.platform === 'win32'
-      ? ['cmd.exe', ['/c', 'start', '""', url]]
-      : ['xdg-open', [url]]
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+    const plan = browserOpenPlan(url)
+    const child = spawn(plan.command, plan.args, plan.options)
     child.on('error', () => { /* prevent unhandled error event on headless environments */ })
     child.unref()
     return true
   } catch {
     return false
+  }
+}
+
+function writeBrowserUrl(label, url) {
+  process.stderr.write(`${label}${url}\n`)
+  if (process.platform === 'win32') {
+    process.stderr.write('Open that link in the browser address bar. Pasting it into PowerShell or Command Prompt splits the URL at & (the code_challenge part) and the sign-in page reports it as invalid.\n')
   }
 }
 
@@ -1364,7 +1397,10 @@ async function loginBrowser({ silent = false } = {}) {
       url.searchParams.set('state', state)
       url.searchParams.set('code_challenge', challenge)
       url.searchParams.set('code_challenge_method', 'S256')
-      if (!silent) process.stderr.write(`Opening browser to sign in:\n${url}\n\n`)
+      if (!silent) {
+        writeBrowserUrl('Opening browser to sign in:\n', url.toString())
+        process.stderr.write('\n')
+      }
       openBrowser(url.toString())
     })
     server.on('close', () => clearTimeout(timer))
@@ -1385,9 +1421,8 @@ async function loginBrowser({ silent = false } = {}) {
 
 async function loginDevice() {
   const start = await postOAuth('/api/cli/oauth/device', { client_id: CLIENT_ID })
-  process.stderr.write(
-    `Open: ${start.verification_uri_complete}\nCode: ${start.user_code}\nWaiting for approval...\n`,
-  )
+  writeBrowserUrl('Open: ', start.verification_uri_complete)
+  process.stderr.write(`Code: ${start.user_code}\nWaiting for approval...\n`)
   openBrowser(start.verification_uri_complete)
   const deadline = Date.now() + Number(start.expires_in || 900) * 1000
   let waitSec = Number(start.interval || 5)

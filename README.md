@@ -60,6 +60,9 @@ Or run instantly without installing:
 npx apinex
 ```
 
+> **Troubleshooting: Windows login says the link is invalid, or PowerShell reports a batch-file error**  
+> `apinex login` must open the full sign-in URL in the browser. Do not paste that URL into PowerShell or Command Prompt — `&` is a command separator there, so `code_challenge` is cut off and the page rejects the login. Paste it into the browser address bar, or run `apinex login` again and approve the page that opens.
+>
 > **Troubleshooting: `command not found: apinex`**  
 > If `apinex` is not found after running `npm install -g`, your shell needs npm's global bin directory in your `$PATH`. Run:
 > 

@@ -121,6 +121,22 @@ test('Security Audit Fixes Validation', async (t) => {
     assert.equal(typeof mod.openBrowser('https://apinex.bond'), 'boolean')
   })
 
+  await t.test('2b. Windows browser launch keeps OAuth query separators off the cmd command line', () => {
+    const url = 'https://apinex.bond/cli/connect?client_id=apinex-cli&redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2Fcallback&state=abc&code_challenge=xyz&code_challenge_method=S256'
+    const plan = mod.browserOpenPlan(url, 'win32')
+    const commandLine = [plan.command, ...plan.args].join(' ')
+    assert.equal(plan.command, 'cmd.exe')
+    assert.equal(plan.options.windowsVerbatimArguments, true)
+    assert.equal(plan.options.env.APINEX_OPEN_URL, url)
+    assert.equal(commandLine.includes('&'), false)
+    assert.equal(commandLine.includes('%3A'), false)
+    assert.equal(commandLine.includes('code_challenge'), false)
+    assert.match(commandLine, /start "" "%APINEX_OPEN_URL%"/)
+    assert.throws(() => {
+      mod.browserOpenPlan('https://apinex.bond/cli/connect?a=1"&calc', 'win32')
+    }, /command-line metacharacters/)
+  })
+
   await t.test('3. createTopupInvoice rejects invalid, negative, or NaN amounts', async () => {
     await assert.rejects(async () => {
       await mod.createTopupInvoice(-10)
