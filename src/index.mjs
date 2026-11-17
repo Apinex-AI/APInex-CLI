@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { execFileSync, execSync, spawn } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import https from 'node:https'
+import dns from 'node:dns'
 import { setDefaultAutoSelectFamily } from 'node:net'
 import { setDefaultResultOrder } from 'node:dns'
 import { homedir } from 'node:os'
@@ -33,9 +35,29 @@ if (process.platform === 'win32') {
 const SITE_ORIGIN = process.env.APINEX_SITE_URL || 'https://apinex.bond'
 const API_ORIGIN = process.env.APINEX_API_URL || 'https://api.apinex.bond'
 const CLIENT_ID = 'apinex-cli'
-const VERSION = '1.0.8'
+const VERSION = '1.0.9'
 const CLI_SRC = 'apinexcli'
 const MODEL_TTL_MS = 10 * 60 * 1000
+
+// Some networks sinkhole api.apinex.bond to a private address (this report
+// resolved it to 10.10.34.34 and refused port 443). Browsers use their own
+// DNS, so the site still opens. Pin a public answer from DNS-over-HTTPS.
+const pinnedHosts = new Map()
+const originalLookup = dns.lookup.bind(dns)
+dns.lookup = function lookupWithPin(hostname, options, callback) {
+  if (typeof options === 'function') {
+    callback = options
+    options = {}
+  }
+  const addresses = pinnedHosts.get(hostname)
+  if (!addresses?.length) return originalLookup(hostname, options, callback)
+  if (options?.all) callback(null, addresses.map((address) => ({ address, family: 4 })))
+  else callback(null, addresses[0], 4)
+}
+
+export function systemDnsIsUnusable(addresses) {
+  return !Array.isArray(addresses) || addresses.length === 0 || addresses.every((address) => isPrivateHost(address))
+}
 
 const CLI_HEADERS = {
   'User-Agent': `APInex-CLI/${VERSION}`,
@@ -812,10 +834,67 @@ export function describeNetworkError(err) {
   return detail && !message.includes(detail) ? `${message} (${detail})` : message
 }
 
+function resolveAViaDoh(hostname) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      host: '1.1.1.1',
+      servername: 'cloudflare-dns.com',
+      method: 'GET',
+      path: `/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
+      headers: { Accept: 'application/dns-json', Host: 'cloudflare-dns.com' },
+      timeout: 8_000,
+    }, (res) => {
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          const addresses = (Array.isArray(data.Answer) ? data.Answer : [])
+            .filter((record) => record?.type === 1 && typeof record.data === 'string' && !isPrivateHost(record.data))
+            .map((record) => record.data)
+          if (!addresses.length) reject(new Error(`No public DNS answer for ${hostname}`))
+          else resolve([...new Set(addresses)])
+        } catch (err) {
+          reject(err)
+        }
+      })
+    })
+    req.on('timeout', () => req.destroy(new Error('DNS lookup timed out')))
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+export async function usePublicDnsIfNeeded(hostname) {
+  if (!hostname || pinnedHosts.has(hostname) || isPrivateHost(hostname)) return
+  let addresses = []
+  try {
+    const rows = await dns.promises.lookup(hostname, { all: true })
+    addresses = rows.map((row) => row.address)
+  } catch {
+    addresses = []
+  }
+  if (!systemDnsIsUnusable(addresses)) {
+    pinnedHosts.set(hostname, null)
+    return
+  }
+  try {
+    pinnedHosts.set(hostname, await resolveAViaDoh(hostname))
+  } catch {
+    pinnedHosts.set(hostname, null)
+  }
+}
+
 function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
-  return fetch(url, { ...options, signal }).catch((err) => {
+  const run = async () => {
+    try {
+      await usePublicDnsIfNeeded(new URL(url).hostname)
+    } catch { /* relative or malformed URLs keep the default resolver */ }
+    return fetch(url, { ...options, signal })
+  }
+  return run().catch((err) => {
     const wrapped = new Error(describeNetworkError(err))
     wrapped.code = err?.cause?.code || err?.code
     wrapped.cause = err

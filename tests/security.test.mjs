@@ -13,6 +13,22 @@ import {
 import { tmpdir } from 'node:os'
 import * as mod from '../src/index.mjs'
 
+test('private sinkhole answers are replaced with public DNS', async () => {
+  assert.equal(mod.systemDnsIsUnusable(['10.10.34.34']), true)
+  assert.equal(mod.systemDnsIsUnusable(['104.21.49.53']), false)
+  assert.equal(mod.systemDnsIsUnusable([]), true)
+  const dns = await import('node:dns')
+  const original = dns.promises.lookup
+  dns.promises.lookup = async () => [{ address: '10.10.34.34', family: 4 }]
+  try {
+    await mod.usePublicDnsIfNeeded('api.apinex.bond')
+    const res = await fetch('https://api.apinex.bond/api/cli/version', { signal: AbortSignal.timeout(10000) })
+    assert.equal(res.ok || res.status === 404, true)
+  } finally {
+    dns.promises.lookup = original
+  }
+})
+
 test('network errors keep the underlying cause code', () => {
   const err = new TypeError('fetch failed')
   err.cause = Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' })
